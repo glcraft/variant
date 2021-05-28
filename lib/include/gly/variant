@@ -1,97 +1,18 @@
 #pragma once
-#include <type_traits>
+#include "type_traits"
 namespace gly
 {
-    namespace impl
-    {
-        constexpr size_t max(size_t a, size_t b)
-        {
-            return (a < b) ? b : a;
-        }
-        template <size_t i, typename T, typename ...Types>
-        struct get_max_sizeof
-        {
-        private:
-            static constexpr size_t i1 = max(i, sizeof(T));
-        public:
-            static constexpr size_t value =get_max_sizeof<i1, Types...>::value;
-        };
-        template <size_t i, typename T>
-        struct get_max_sizeof<i, T>
-        {
-            static constexpr size_t value = max(i, sizeof(T));
-        }; 
-        template <typename... Args>
-        constexpr auto get_max_sizeof_v = get_max_sizeof<0,Args...>::value;
-        template <typename T, typename U, typename ...Args>
-        struct index_of
-        {
-            static constexpr size_t value = std::is_same_v<T, U> ? 0 : 1+index_of<T, Args...>::value;
-            // static constexpr size_t value = (std::is_same_v<T, Args> ? 0 : 1 + ...);
-        };
-        template <typename T, typename U>
-        struct index_of<T,U>
-        {
-            static constexpr size_t value = std::is_same_v<T, U> ? 0 : 1;
-        };
-        template <typename T, typename... Args>
-        constexpr auto index_of_v = index_of<T, Args...>::value;
-        template <size_t i, typename T, typename... Args>
-        struct type_of
-        {
-            using type = typename type_of<i-1, Args...>::type;//typename std::conditional_t<i==0, T, typename type_of<i-1, Args...>::type>;
-        };
-        template <typename T, typename... Args>
-        struct type_of<0, T, Args...>
-        {
-            using type = T;
-        };
-        template <typename T>
-        struct type_of<0, T>
-        {
-            using type = T;
-        };
-        template <size_t i, typename... Args>
-        using type_of_t = typename type_of<i, Args...>::type;
-        template <typename T, typename U, typename ...Args>
-        constexpr bool is_in_v = (std::is_same_v<T, U> || is_in_v<T, Args...>);
-        template <typename T, typename U>
-        constexpr bool is_in_v<T,U> = std::is_same_v<T, U>;
-        template <typename T, typename U, typename ...Args>
-        constexpr bool is_constructible_with_v = ((!std::is_fundamental_v<U> && std::is_constructible_v<U,T>) || std::is_same_v<T,U>) || is_constructible_with_v<T, Args...>;
-        template <typename T, typename U>
-        constexpr bool is_constructible_with_v<T,U> = (!std::is_fundamental_v<U> && std::is_constructible_v<U,T>) || std::is_same_v<T,U>;
-        struct non_constructible_with{};
-        template <typename T, typename U, typename... Args>
-        struct _constructible_with {
-            using type = std::conditional_t<is_constructible_with_v<T,U>, U, typename _constructible_with<T, Args...>::type>;
-        };
-
-        template <typename T, typename U>
-        struct _constructible_with<T,U> {
-            using type = std::conditional_t<is_constructible_with_v<T,U>, U, non_constructible_with>;
-        };
-        template <typename T, typename ...Args>
-        struct constructible_with {
-        private:
-            using _type = typename _constructible_with<T, Args...>::type;
-        public:
-            using type = std::enable_if_t<!std::is_same_v<_type, non_constructible_with>, _type>;
-        };
-        template <typename T, typename ...Args>
-        using constructible_with_t = typename constructible_with<T, Args...>::type;
-    } // namespace impl
 
     template <typename... Types>
     class variant
     {
     public:
         template <typename T>
-        static constexpr bool is_part_of = impl::index_of_v<T, Types...> < sizeof...(Types);
+        static constexpr bool is_part_of = index_of<T, Types...>::value < sizeof...(Types);
 
         variant() : _idx(0)
         {
-            using T = typename impl::type_of_t<0, Types...>;
+            using T = typename type_of_t<0, Types...>;
             // if constexpr(std::is_trivially_constructible_v<T>)
             //     get<T>() = T();
             // else
@@ -112,9 +33,9 @@ namespace gly
         }
         template <
             typename T, 
-            class = std::enable_if_t<impl::is_constructible_with_v<T,Types...>>,
-            typename U = impl::constructible_with_t<T, Types...>, 
-            size_t idx = impl::index_of_v<U, Types...>>
+            class = std::enable_if_t<is_constructible_with<T,Types...>::value>,
+            typename U = constructible_with_t<T, Types...>, 
+            size_t idx = index_of<U, Types...>::value>
         variant(T&& v) : _idx(idx)
         {
             new (_data) U(std::forward<T>(v));
@@ -122,7 +43,7 @@ namespace gly
         template <typename T, typename... Args>
         T& emplace(Args&&... args)
         {
-            constexpr size_t idx = impl::index_of_v<T, Types...>;
+            constexpr size_t idx = index_of<T, Types...>::value;
             static_assert(idx < sizeof...(Types), "variant::emplace : type T not part of Types");
             if (_idx != -1)
                 destroy<0>();
@@ -156,7 +77,7 @@ namespace gly
         void destroy() {
             if (i==_idx)
             {
-                using found_t = typename impl::type_of_t<i, Types...>;
+                using found_t = typename type_of_t<i, Types...>;
                 ((found_t*)(_data))->~found_t();
             }
             else
@@ -172,7 +93,7 @@ namespace gly
         {
             if (i==other._idx)
             {
-                using found_t = typename impl::type_of_t<i, Types...>;
+                using found_t = typename type_of_t<i, Types...>;
                 new (_data) found_t(other.get<found_t>());
                 _idx = i;
             }
@@ -189,7 +110,7 @@ namespace gly
         {
             if (i==other._idx)
             {
-                using found_t = typename impl::type_of_t<i, Types...>;
+                using found_t = typename type_of_t<i, Types...>;
                 new (_data) found_t(std::forward<found_t>(other.get<found_t>()));
                 _idx = i;
             }
@@ -202,7 +123,7 @@ namespace gly
         void construct_move<sizeof...(Types)-1>(variant&& other)
         {}
         size_t _idx;
-        uint8_t _data[impl::get_max_sizeof_v<Types...>];
+        uint8_t _data[get_max_sizeof_v<Types...>];
     };
     template<typename T, typename ...Types>
     constexpr bool is_part_of(const variant<Types...>& ) {
